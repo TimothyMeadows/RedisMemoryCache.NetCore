@@ -11,14 +11,18 @@ namespace RedisMemoryCache.NetCore
         private readonly TimedMemoryCache.NetCore.TimedMemoryCache _cache;
         private readonly IDatabase _database;
         private readonly bool _synchronize;
+        private readonly TimeSpan? _expires;
 
-        public RedisMemoryCache(string connectionString, int seconds = 300, bool synchronize = true)
+        public event TimeoutCallback OnTimeout;
+
+        public RedisMemoryCache(string connectionString, int seconds = 300, TimeSpan? expires = null, bool synchronize = true)
         {
             _redis = ConnectionMultiplexer.Connect(connectionString);
             _database = _redis.GetDatabase();
 
             _cache = new TimedMemoryCache.NetCore.TimedMemoryCache(seconds);
-            _cache.OnTimeout += OnTimeout;
+            _cache.OnTimeout += Cache_OnTimeout;
+            _expires = expires;
             _synchronize = synchronize;
         }
 
@@ -36,11 +40,11 @@ namespace RedisMemoryCache.NetCore
                     return;
 
                 var json = JsonSerializer.Serialize(value);
-                _database.StringSet(new RedisKey(key), new RedisValue(json), null, When.Always, CommandFlags.FireAndForget);
+                _database.StringSet(new RedisKey(key), new RedisValue(json), _expires, When.Always, CommandFlags.FireAndForget);
             }
         }
 
-        public void Write(string key, dynamic value, bool synchronize = true)
+        public void Write(string key, dynamic value, TimeSpan? expires = null, bool synchronize = true)
         {
             _cache.Write(key, value);
             if (!_synchronize)
@@ -51,10 +55,10 @@ namespace RedisMemoryCache.NetCore
                 return;
 
             var json = JsonSerializer.Serialize(value);
-            _database.StringSet(new RedisKey(key), new RedisValue(json), null, When.Always, CommandFlags.FireAndForget);
+            _database.StringSet(new RedisKey(key), new RedisValue(json), expires, When.Always, CommandFlags.FireAndForget);
         }
 
-        public void Write(string key, dynamic value, long timeout, bool synchronize = true)
+        public void Write(string key, dynamic value, long timeout, TimeSpan? expires = null, bool synchronize = true)
         {
             _cache.Write(key, value, timeout);
             if (!_synchronize)
@@ -65,10 +69,10 @@ namespace RedisMemoryCache.NetCore
                 return;
 
             var json = JsonSerializer.Serialize(value);
-            _database.StringSet(new RedisKey(key), new RedisValue(json), null, When.Always, CommandFlags.FireAndForget);
+            _database.StringSet(new RedisKey(key), new RedisValue(json), expires, When.Always, CommandFlags.FireAndForget);
         }
 
-        public T Write<T>(string key, T value, bool synchronize = true)
+        public T Write<T>(string key, T value, TimeSpan? expires = null, bool synchronize = true)
         {
             var entry = _cache.Write<T>(key, value);
             if (!_synchronize)
@@ -79,12 +83,12 @@ namespace RedisMemoryCache.NetCore
                 return entry;
 
             var json = JsonSerializer.Serialize(value);
-            _database.StringSet(new RedisKey(key), new RedisValue(json), null, When.Always, CommandFlags.FireAndForget);
+            _database.StringSet(new RedisKey(key), new RedisValue(json), expires, When.Always, CommandFlags.FireAndForget);
 
             return entry;
         }
 
-        public T Write<T>(string key, T value, long timeout, bool synchronize = true)
+        public T Write<T>(string key, T value, long timeout, TimeSpan? expires = null, bool synchronize = true)
         {
             var entry = _cache.Write<T>(key, value, timeout);
             if (!_synchronize)
@@ -95,7 +99,7 @@ namespace RedisMemoryCache.NetCore
                 return entry;
 
             var json = JsonSerializer.Serialize(value);
-            _database.StringSet(new RedisKey(key), new RedisValue(json), null, When.Always, CommandFlags.FireAndForget);
+            _database.StringSet(new RedisKey(key), new RedisValue(json), expires, When.Always, CommandFlags.FireAndForget);
 
             return entry;
         }
@@ -129,16 +133,28 @@ namespace RedisMemoryCache.NetCore
             _cache?.Dispose();
         }
 
-        private void OnTimeout(TimedMemoryCache.NetCore.TimedMemoryCache source, string key, dynamic value, long timeout)
+        private void Cache_OnTimeout(TimedMemoryCache.NetCore.TimedMemoryCache source, string key, dynamic value, long timeout)
         {
-            var json = _database.StringGet(key);
-            if (!json.HasValue)
-                return;
+            try
+            {
+                var json = _database.StringGet(key);
+                if (!json.HasValue)
+                {
+                    OnTimeout?.Invoke(source, key, value, timeout);
+                    return;
+                }
 
-            var redisValue = JsonSerializer.Deserialize<dynamic>(json.ToString());
-            source.Write(key, redisValue, timeout);
+                var redisValue = JsonSerializer.Deserialize<dynamic>(json.ToString());
+                source.Write(key, redisValue, timeout);
 
-            Console.WriteLine($"Refreshing '{key}'");
+                OnTimeout?.Invoke(source, key, redisValue, timeout);
+            }
+            catch (RedisTimeoutException)
+            {
+                // If we can't reach Redis, reuse what's in memory for now until we can try again in 3 seconds.
+                source.Write(key, value, 3);
+                OnTimeout?.Invoke(source, key, value, 3);
+            }
         }
     }
 }
