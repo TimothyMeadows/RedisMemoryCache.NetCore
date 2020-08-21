@@ -57,9 +57,9 @@ namespace RedisMemoryCache.NetCore
             _database.StringSet(new RedisKey(key), new RedisValue(json), expires, When.Always, CommandFlags.FireAndForget);
         }
 
-        public void Write(string key, dynamic value, long timeout, TimeSpan? expires = null, bool synchronize = true)
+        public void Write(string key, dynamic value, long seconds, TimeSpan? expires = null, bool synchronize = true)
         {
-            _cache.Write(key, value, timeout);
+            _cache.Write(key, value, seconds);
             if (!_synchronize)
                 return;
 
@@ -87,9 +87,9 @@ namespace RedisMemoryCache.NetCore
             return entry;
         }
 
-        public T Write<T>(string key, T value, long timeout, TimeSpan? expires = null, bool synchronize = true)
+        public T Write<T>(string key, T value, long seconds, TimeSpan? expires = null, bool synchronize = true)
         {
-            var entry = _cache.Write<T>(key, value, timeout);
+            var entry = _cache.Write<T>(key, value, seconds);
             if (!_synchronize)
                 return entry;
 
