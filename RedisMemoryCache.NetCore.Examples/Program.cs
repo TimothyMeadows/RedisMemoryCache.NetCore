@@ -10,15 +10,15 @@ namespace RedisMemoryCache.NetCore.Examples
         {
             var connectionString = File.ReadAllText("secret.txt");
 
-            var cache = new RedisMemoryCache(connectionString, 3, TimeSpan.FromHours(1))
+            var cache = new RedisMemoryCache(connectionString, 3, TimeSpan.FromSeconds(30))
             {
                 ["caw"] = "caw caw caw", 
                 ["caw2"] = new KeyValuePair<string, string>("caw", "caw caw caw")
             };
 
-            cache.OnTimeout += (source, key, value, timeout) =>
+            cache.OnTimeout += (source, key, value, timeout, stale, removed) =>
             {
-                Console.WriteLine($"'{key}' expired");
+                Console.WriteLine($"{key}: stale={stale} removed={removed}");
             };
 
             Console.ReadKey();

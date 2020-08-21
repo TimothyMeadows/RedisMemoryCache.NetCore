@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Text.Json;
 using StackExchange.Redis;
-using TimedMemoryCache.NetCore;
 
 namespace RedisMemoryCache.NetCore
 {
@@ -140,20 +139,20 @@ namespace RedisMemoryCache.NetCore
                 var json = _database.StringGet(key);
                 if (!json.HasValue)
                 {
-                    OnTimeout?.Invoke(source, key, value, timeout);
+                    OnTimeout?.Invoke(source, key, value, timeout, false, true);
                     return;
                 }
 
                 var redisValue = JsonSerializer.Deserialize<dynamic>(json.ToString());
                 source.Write(key, redisValue, timeout);
 
-                OnTimeout?.Invoke(source, key, redisValue, timeout);
+                OnTimeout?.Invoke(source, key, redisValue, timeout, false, false);
             }
             catch (RedisTimeoutException)
             {
                 // If we can't reach Redis, reuse what's in memory for now until we can try again in 3 seconds.
                 source.Write(key, value, 3);
-                OnTimeout?.Invoke(source, key, value, 3);
+                OnTimeout?.Invoke(source, key, value, 3, true, false);
             }
         }
     }
