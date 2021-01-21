@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Linq;
 using System.Text.Json;
 using StackExchange.Redis;
 
@@ -7,10 +9,12 @@ namespace RedisMemoryCache.NetCore
     public class RedisMemoryCache : IDisposable
     {
         private readonly ConnectionMultiplexer _redis;
+        private readonly IServer _server;
         private readonly TimedMemoryCache.NetCore.TimedMemoryCache _cache;
         private readonly IDatabase _database;
         private readonly bool _synchronize;
         private readonly TimeSpan? _expires;
+        private int _length = -1;
 
         public event TimeoutCallback OnTimeout;
 
@@ -18,6 +22,8 @@ namespace RedisMemoryCache.NetCore
         {
             _redis = ConnectionMultiplexer.Connect(connectionString);
             _database = _redis.GetDatabase();
+            // TODO: Might need a way to specific this via constructor, or IOptions. For now, just grab the first server we are connected to, which should be right 99% of the time.
+            _server = _redis.GetServer(_redis.GetEndPoints()[0]);
 
             _cache = new TimedMemoryCache.NetCore.TimedMemoryCache(seconds);
             _cache.OnTimeout += Cache_OnTimeout;
@@ -40,6 +46,20 @@ namespace RedisMemoryCache.NetCore
 
                 var json = JsonSerializer.Serialize(value);
                 _database.StringSet(new RedisKey(key), new RedisValue(json), _expires, When.Always, CommandFlags.FireAndForget);
+            }
+        }
+
+        /// <summary>
+        /// This is using KEYS * which can be very costly depending on your environment.
+        /// </summary>
+        public int Length
+        {
+            get
+            {
+                if (_length == -1)
+                    _length = _server.Keys(_database.Database).Count();
+
+                return _length;
             }
         }
 
@@ -136,6 +156,9 @@ namespace RedisMemoryCache.NetCore
         {
             try
             {
+                // Reset length cache after each timeout.
+                _length = -1;
+
                 var json = _database.StringGet(key);
                 if (!json.HasValue)
                 {
